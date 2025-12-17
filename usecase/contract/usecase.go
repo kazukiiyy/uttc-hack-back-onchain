@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -132,26 +133,52 @@ func (uc *contractUsecase) handleEvent(event *model.ContractEvent) {
 }
 
 // notifyBackend はメインバックエンドにイベントを通知
+// リトライロジック付き（最大3回）
 func (uc *contractUsecase) notifyBackend(endpoint string, payload interface{}) error {
 	url := uc.backendBaseURL + endpoint
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+	maxRetries := 3
+	var lastErr error
 
-	if resp.StatusCode >= 400 {
-		log.Printf("Backend returned status %d for %s", resp.StatusCode, endpoint)
+	for i := 0; i < maxRetries; i++ {
+		if i > 0 {
+			// リトライ前に待機（指数バックオフ）
+			waitTime := time.Duration(i) * time.Second
+			log.Printf("Retrying backend notification (attempt %d/%d) after %v...", i+1, maxRetries, waitTime)
+			time.Sleep(waitTime)
+		}
+
+		resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonData))
+		if err != nil {
+			lastErr = fmt.Errorf("failed to send request: %w", err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return nil // 成功
+		}
+
+		// レスポンスボディを読み取ってエラー詳細を取得
+		bodyBytes := make([]byte, 1024)
+		n, _ := resp.Body.Read(bodyBytes)
+		bodyStr := string(bodyBytes[:n])
+
+		lastErr = fmt.Errorf("backend returned status %d: %s", resp.StatusCode, bodyStr)
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			// 4xxエラーはリトライしない
+			return lastErr
+		}
+		// 5xxエラーやネットワークエラーはリトライ
 	}
 
-	return nil
+	return fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)
 }
 
 // GetItem はコントラクトから商品情報を取得
