@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math/big"
 	"time"
 )
 
@@ -28,3 +29,75 @@ type PaymentOrder struct {
 	TxHash      string      `json:"tx_hash"`       // トランザクションハッシュ
 	CreatedAt   time.Time   `json:"created_at"`
 }
+
+// ===============================================
+// スマートコントラクト関連のモデル
+// ===============================================
+
+// EventType はコントラクトイベントの種類
+type EventType string
+
+const (
+	EventItemListed       EventType = "ItemListed"
+	EventItemPurchased    EventType = "ItemPurchased"
+	EventItemUpdated      EventType = "ItemUpdated"
+	EventItemCancelled    EventType = "ItemCancelled"
+	EventReceiptConfirmed EventType = "ReceiptConfirmed"
+)
+
+// ContractEvent はコントラクトイベントを表す
+type ContractEvent struct {
+	Type        EventType `json:"type"`
+	TxHash      string    `json:"tx_hash"`
+	BlockNo     uint64    `json:"block_number"`
+	ItemId      uint64    `json:"item_id"`
+	TokenId     uint64    `json:"token_id,omitempty"`
+	Title       string    `json:"title,omitempty"`
+	Price       *big.Int  `json:"price,omitempty"`
+	Explanation string    `json:"explanation,omitempty"`
+	ImageUrl    string    `json:"image_url,omitempty"`
+	Uid         string    `json:"uid,omitempty"`
+	Category    string    `json:"category,omitempty"`
+	Seller      string    `json:"seller,omitempty"`
+	Buyer       string    `json:"buyer,omitempty"`
+	CreatedAt   uint64    `json:"created_at,omitempty"`
+	UpdatedAt   uint64    `json:"updated_at,omitempty"`
+}
+
+// ContractItem はコントラクトの商品情報
+type ContractItem struct {
+	ItemId      uint64   `json:"item_id"`
+	TokenId     uint64   `json:"token_id"`
+	Title       string   `json:"title"`
+	Price       *big.Int `json:"price"`
+	Explanation string   `json:"explanation"`
+	ImageUrl    string   `json:"image_url"`
+	Uid         string   `json:"uid"`
+	CreatedAt   uint64   `json:"created_at"`
+	UpdatedAt   uint64   `json:"updated_at"`
+	IsPurchased bool     `json:"is_purchased"`
+	Category    string   `json:"category"`
+	Seller      string   `json:"seller"`
+	Buyer       string   `json:"buyer"`
+	Status      uint8    `json:"status"` // 0: Listed, 1: Purchased, 2: Completed, 3: Cancelled
+}
+
+// TxVerification はトランザクション検証結果
+type TxVerification struct {
+	TxHash         string `json:"tx_hash"`
+	Status         string `json:"status"` // "pending", "success", "failed"
+	BlockNumber    uint64 `json:"block_number,omitempty"`
+	GasUsed        uint64 `json:"gas_used,omitempty"`
+	Success        bool   `json:"success"`
+	IsContractCall bool   `json:"is_contract_call"`
+}
+
+// ItemStatus はコントラクト上の商品ステータス
+type ItemStatus uint8
+
+const (
+	ItemStatusListed    ItemStatus = 0
+	ItemStatusPurchased ItemStatus = 1
+	ItemStatusCompleted ItemStatus = 2
+	ItemStatusCancelled ItemStatus = 3
+)
