@@ -90,6 +90,10 @@ func (uc *contractUsecase) handleEvent(event *model.ContractEvent) {
 	switch event.Type {
 	case model.EventItemListed:
 		endpoint = "/api/v1/blockchain/item-listed"
+		log.Printf("Preparing ItemListed payload: chain_item_id=%d, uid=%s, title=%s", event.ItemId, event.Uid, event.Title)
+		if event.Uid == "" {
+			log.Printf("WARNING: uid is empty in ItemListed event for item %d", event.ItemId)
+		}
 		payload = map[string]interface{}{
 			"chain_item_id": event.ItemId,
 			"token_id":      event.TokenId,
