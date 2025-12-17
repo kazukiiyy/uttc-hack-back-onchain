@@ -51,29 +51,16 @@ func NewFrimaContractGateway(client *ethclient.Client, contractAddr string) (*Fr
 	}
 
 	contractAddress := common.HexToAddress(contractAddr)
-	log.Printf("=== Initializing Contract Gateway ===")
-	log.Printf("Contract Address: %s", contractAddress.Hex())
+	log.Printf("Initializing contract gateway: %s", contractAddress.Hex())
 	
 	// イベントが正しく定義されているか確認
-	log.Printf("=== Verifying Event Definitions in ABI ===")
 	eventNames := []string{"ItemListed", "ItemPurchased", "ItemUpdated", "ItemCancelled", "ReceiptConfirmed"}
-	allEventsFound := true
 	for _, eventName := range eventNames {
-		if event, ok := parsedABI.Events[eventName]; ok {
-			log.Printf("✓ Event '%s' found - Signature: %s", eventName, event.ID.Hex())
-		} else {
-			log.Printf("✗ WARNING: Event '%s' NOT found in ABI", eventName)
-			allEventsFound = false
+		if _, ok := parsedABI.Events[eventName]; !ok {
+			log.Printf("WARNING: Event '%s' not found in ABI", eventName)
 		}
 	}
-	
-	if !allEventsFound {
-		log.Printf("ERROR: Some events are missing from ABI. Event listener may not work correctly.")
-	} else {
-		log.Printf("✓ All required events are defined in ABI")
-	}
 
-	// コントラクトアドレスの検証（ゼロアドレスでないことを確認）
 	if contractAddress == common.HexToAddress("0x0") || contractAddress == common.HexToAddress("0x0000000000000000000000000000000000000000") {
 		log.Printf("WARNING: Contract address appears to be zero address")
 	}
@@ -160,71 +147,38 @@ func (g *FrimaContractGateway) SubscribeEvents(ctx context.Context) (<-chan *mod
 		Addresses: []common.Address{g.contractAddress},
 	}
 
-	log.Printf("=== Subscribing to Events ===")
-	log.Printf("Contract Address: %s", g.contractAddress.Hex())
-	log.Printf("Client Type: Checking if WebSocket connection...")
-	
-	// 接続テスト: 最新ブロックを取得して接続を確認
 	header, err := g.client.HeaderByNumber(ctx, nil)
 	if err != nil {
-		log.Printf("ERROR: Failed to get latest block header (connection test failed): %v", err)
 		return nil, fmt.Errorf("connection test failed: %w", err)
 	}
-	log.Printf("✓ Connection test passed - Latest block: %d", header.Number.Uint64())
 	
 	logs := make(chan types.Log)
-	log.Printf("Calling SubscribeFilterLogs...")
 	sub, err := g.client.SubscribeFilterLogs(ctx, query, logs)
 	if err != nil {
-		log.Printf("✗ ERROR: Failed to subscribe to events: %v", err)
-		log.Printf("  This usually means:")
-		log.Printf("    - WebSocket connection is not available (using HTTP instead)")
-		log.Printf("    - Network connection issue")
-		log.Printf("    - Invalid contract address")
+		log.Printf("ERROR: Failed to subscribe to events: %v", err)
 		return nil, err
 	}
-	log.Printf("✓ Successfully subscribed to events (subscription active)")
-	log.Printf("  Waiting for events from contract: %s", g.contractAddress.Hex())
+	log.Printf("Subscribed to events (latest block: %d)", header.Number.Uint64())
 
 	go func() {
 		defer close(eventChan)
-		defer func() {
-			sub.Unsubscribe()
-			log.Printf("Event subscription unsubscribed")
-		}()
+		defer sub.Unsubscribe()
 
-		log.Printf("=== Event subscription goroutine started ===")
 		for {
 			select {
 			case <-ctx.Done():
-				log.Printf("Context cancelled, stopping event subscription")
 				return
 			case err := <-sub.Err():
-				log.Printf("✗ ERROR: Event subscription error: %v", err)
-				log.Printf("  Subscription may have been closed or connection lost")
+				log.Printf("ERROR: Event subscription error: %v", err)
 				return
 			case vLog := <-logs:
-				log.Printf("=== Received log from subscription ===")
-				log.Printf("  TX Hash: %s", vLog.TxHash.Hex())
-				log.Printf("  Block Number: %d", vLog.BlockNumber)
-				log.Printf("  Address: %s", vLog.Address.Hex())
-				log.Printf("  Contract Address (expected): %s", g.contractAddress.Hex())
 				if vLog.Address != g.contractAddress {
-					log.Printf("  ⚠ WARNING: Log address does not match contract address!")
-					log.Printf("    This log may be from a different contract")
-				} else {
-					log.Printf("  ✓ Address matches contract address")
-				}
-				log.Printf("  Topics Count: %d", len(vLog.Topics))
-				if len(vLog.Topics) > 0 {
-					log.Printf("  Event Signature (Topic[0]): %s", vLog.Topics[0].Hex())
+					continue
 				}
 				event := g.parseLog(vLog)
 				if event != nil {
-					log.Printf("✓ Successfully parsed event: %s for item %d", event.Type, event.ItemId)
+					log.Printf("Event received: %s itemId=%d tx=%s", event.Type, event.ItemId, event.TxHash)
 					eventChan <- event
-				} else {
-					log.Printf("✗ Failed to parse event from log (tx: %s) - event signature may not match", vLog.TxHash.Hex())
 				}
 			}
 		}
@@ -240,26 +194,17 @@ func (g *FrimaContractGateway) ScanPastEvents(ctx context.Context, fromBlock uin
 	go func() {
 		defer close(eventChan)
 
-		log.Printf("=== Starting Past Events Scan ===")
-		log.Printf("Contract Address: %s", g.contractAddress.Hex())
-		
-		// 現在のブロック番号を取得
 		header, err := g.client.HeaderByNumber(ctx, nil)
 		if err != nil {
-			log.Printf("✗ ERROR: Failed to get latest block: %v", err)
+			log.Printf("ERROR: Failed to get latest block: %v", err)
 			return
 		}
 
 		currentBlock := header.Number.Uint64()
-		log.Printf("Current block number: %d", currentBlock)
-		
-		// fromBlockが0の場合は、最後の1000ブロックからスキャン
 		actualFromBlock := fromBlock
 		if fromBlock == 0 {
 			if currentBlock > 1000 {
 				actualFromBlock = currentBlock - 1000
-			} else {
-				actualFromBlock = 0
 			}
 		}
 
@@ -274,60 +219,24 @@ func (g *FrimaContractGateway) ScanPastEvents(ctx context.Context, fromBlock uin
 			ToBlock:   new(big.Int).SetUint64(actualToBlock),
 		}
 
-		log.Printf("Scanning past events:")
-		log.Printf("  From Block: %d", actualFromBlock)
-		log.Printf("  To Block: %d", actualToBlock)
-		log.Printf("  Block Range: %d blocks", actualToBlock-actualFromBlock)
-
-		log.Printf("Calling FilterLogs to retrieve events...")
 		logs, err := g.client.FilterLogs(ctx, query)
 		if err != nil {
-			log.Printf("✗ ERROR: Failed to scan past events: %v", err)
-			log.Printf("  This could mean:")
-			log.Printf("    - Contract address is incorrect")
-			log.Printf("    - No events exist in the specified block range")
-			log.Printf("    - Network connection issue")
+			log.Printf("ERROR: Failed to scan past events: %v", err)
 			return
 		}
 
-		log.Printf("✓ FilterLogs completed successfully")
-		log.Printf("Found %d log entries in block range %d-%d", len(logs), actualFromBlock, actualToBlock)
-		
-		if len(logs) == 0 {
-			log.Printf("  No events found in this block range")
-			log.Printf("  This could mean:")
-			log.Printf("    - No transactions have been made to this contract")
-			log.Printf("    - Events were emitted in a different block range")
-			log.Printf("    - Contract address might be incorrect")
-		}
+		log.Printf("Scanned %d past events (blocks %d-%d)", len(logs), actualFromBlock, actualToBlock)
 
-		for i, vLog := range logs {
-			log.Printf("=== Processing past log %d/%d ===", i+1, len(logs))
-			log.Printf("  TX Hash: %s", vLog.TxHash.Hex())
-			log.Printf("  Block Number: %d", vLog.BlockNumber)
-			log.Printf("  Address: %s", vLog.Address.Hex())
-			log.Printf("  Contract Address (expected): %s", g.contractAddress.Hex())
+		for _, vLog := range logs {
 			if vLog.Address != g.contractAddress {
-				log.Printf("  ⚠ WARNING: Log address does not match contract address!")
-				log.Printf("    This log may be from a different contract - skipping")
 				continue
-			} else {
-				log.Printf("  ✓ Address matches contract address")
-			}
-			log.Printf("  Topics Count: %d", len(vLog.Topics))
-			if len(vLog.Topics) > 0 {
-				log.Printf("  Event Signature (Topic[0]): %s", vLog.Topics[0].Hex())
 			}
 			event := g.parseLog(vLog)
 			if event != nil {
-				log.Printf("✓ Successfully parsed past event: %s for item %d", event.Type, event.ItemId)
+				log.Printf("Past event: %s itemId=%d tx=%s", event.Type, event.ItemId, event.TxHash)
 				eventChan <- event
-			} else {
-				log.Printf("✗ Failed to parse past event from log (tx: %s) - event signature may not match", vLog.TxHash.Hex())
 			}
 		}
-
-		log.Printf("Finished scanning past events")
 	}()
 
 	return eventChan, nil
@@ -341,44 +250,24 @@ func (g *FrimaContractGateway) parseLog(vLog types.Log) *model.ContractEvent {
 	}
 
 	eventSig := vLog.Topics[0].Hex()
-	
-	// デバッグ用: イベントシグネチャをログに出力
-	log.Printf("Parsing log with event signature: %s (tx: %s, block: %d)", eventSig, vLog.TxHash.Hex(), vLog.BlockNumber)
-
-	// 各イベントのシグネチャを確認
 	itemListedSig := g.contractABI.Events["ItemListed"].ID.Hex()
 	itemPurchasedSig := g.contractABI.Events["ItemPurchased"].ID.Hex()
 	itemUpdatedSig := g.contractABI.Events["ItemUpdated"].ID.Hex()
 	itemCancelledSig := g.contractABI.Events["ItemCancelled"].ID.Hex()
 	receiptConfirmedSig := g.contractABI.Events["ReceiptConfirmed"].ID.Hex()
 
-	log.Printf("Event signatures - ItemListed: %s, ItemPurchased: %s", itemListedSig, itemPurchasedSig)
-
 	switch eventSig {
 	case itemListedSig:
-		log.Printf("Matched ItemListed event")
 		return g.parseItemListed(vLog)
 	case itemPurchasedSig:
-		log.Printf("Matched ItemPurchased event")
 		return g.parseItemPurchased(vLog)
 	case itemUpdatedSig:
-		log.Printf("Matched ItemUpdated event")
 		return g.parseItemUpdated(vLog)
 	case itemCancelledSig:
-		log.Printf("Matched ItemCancelled event")
 		return g.parseItemCancelled(vLog)
 	case receiptConfirmedSig:
-		log.Printf("Matched ReceiptConfirmed event")
 		return g.parseReceiptConfirmed(vLog)
 	default:
-		log.Printf("✗ Unknown event signature: %s", eventSig)
-		log.Printf("  Expected signatures:")
-		log.Printf("    ItemListed: %s", itemListedSig)
-		log.Printf("    ItemPurchased: %s", itemPurchasedSig)
-		log.Printf("    ItemUpdated: %s", itemUpdatedSig)
-		log.Printf("    ItemCancelled: %s", itemCancelledSig)
-		log.Printf("    ReceiptConfirmed: %s", receiptConfirmedSig)
-		log.Printf("  This log may be from a different contract or an unknown event type")
 		return nil
 	}
 }
@@ -419,9 +308,8 @@ func (g *FrimaContractGateway) parseItemListed(vLog types.Log) *model.ContractEv
 	}
 	if uid, ok := data["uid"].(string); ok {
 		event.Uid = uid
-		log.Printf("Parsed uid from ItemListed event: %s", uid)
 	} else {
-		log.Printf("WARNING: uid not found in ItemListed event data")
+		log.Printf("WARNING: uid not found in ItemListed event")
 	}
 	if createdAt, ok := data["createdAt"].(*big.Int); ok {
 		event.CreatedAt = createdAt.Uint64()
@@ -430,7 +318,6 @@ func (g *FrimaContractGateway) parseItemListed(vLog types.Log) *model.ContractEv
 		event.Category = category
 	}
 
-	log.Printf("Parsed ItemListed event: itemId=%d, title=%s, uid=%s, seller=%s, price=%s", event.ItemId, event.Title, event.Uid, event.Seller, event.Price.String())
 	return event
 }
 

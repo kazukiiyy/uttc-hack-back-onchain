@@ -78,59 +78,25 @@ func main() {
 	// --- 4. Contract機能の依存性注入 ---
 	var contractHdlr *contractHandler.ContractHandler
 
-		log.Printf("Checking MARKETPLACE_CONTRACT_ADDRESS: %s", marketplaceAddr)
 	if marketplaceAddr == "" {
-		log.Println("ERROR: MARKETPLACE_CONTRACT_ADDRESS is not set. Event listener will not start.")
-		log.Println("Please set MARKETPLACE_CONTRACT_ADDRESS environment variable.")
+		log.Println("WARNING: MARKETPLACE_CONTRACT_ADDRESS not set. Event listener disabled.")
 	} else {
-		log.Printf("=== Contract Configuration ===")
-		log.Printf("Marketplace contract address found: %s", marketplaceAddr)
-		
-		// WebSocket接続でイベント購読
-		log.Printf("=== WebSocket Connection Test ===")
-		log.Printf("Attempting to connect WebSocket: %s", nodeWSURL)
 		wsClient, err := ethclient.Dial(nodeWSURL)
 		if err != nil {
-			log.Printf("✗ ERROR: Failed to connect WebSocket for events: %v", err)
-			log.Printf("  WebSocket URL: %s", nodeWSURL)
-			log.Printf("  Falling back to HTTP client (real-time events may not work)")
-			log.Printf("  NOTE: HTTP client does NOT support SubscribeFilterLogs")
-			log.Printf("  Real-time event listening will NOT work with HTTP client")
-			// HTTP clientでコントラクト機能は使用可能（ただしリアルタイムイベントは動作しない）
+			log.Printf("WARNING: WebSocket connection failed, using HTTP (real-time events disabled): %v", err)
 			wsClient = client
-		} else {
-			log.Println("✓ Successfully connected to Sepolia network (WebSocket for events).")
-			// WebSocket接続の動作確認
-			ctx := context.Background()
-			header, err := wsClient.HeaderByNumber(ctx, nil)
-			if err != nil {
-				log.Printf("✗ WARNING: WebSocket connection test failed: %v", err)
-			} else {
-				log.Printf("✓ WebSocket connection verified - Latest block: %d", header.Number.Uint64())
-			}
 		}
 
-		log.Printf("Initializing contract gateway...")
 		ctGateway, err := contractGateway.NewFrimaContractGateway(wsClient, marketplaceAddr)
 		if err != nil {
 			log.Printf("ERROR: Failed to initialize contract gateway: %v", err)
-			log.Printf("Event listener will not start.")
 		} else {
-			log.Printf("Contract gateway initialized successfully")
-			log.Printf("Marketplace Contract: %s", marketplaceAddr)
-
 			contractUC := contractUsecase.NewContractUsecase(ctGateway, backendBaseURL)
 			contractHdlr = contractHandler.NewContractHandler(contractUC)
 
-			// イベントリスナーを開始
-			log.Printf("Starting event listener...")
 			ctx := context.Background()
 			if err := contractUC.StartEventListener(ctx); err != nil {
 				log.Printf("ERROR: Failed to start event listener: %v", err)
-				log.Printf("Please check WebSocket connection and contract address.")
-			} else {
-				log.Println("✓ Contract event listener started successfully.")
-				log.Println("✓ Listening for ItemListed, ItemPurchased, and other events...")
 			}
 		}
 	}
