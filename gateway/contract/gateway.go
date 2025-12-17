@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -140,6 +141,7 @@ func (g *FrimaContractGateway) GetItem(ctx context.Context, itemId uint64) (*mod
 }
 
 // SubscribeEvents はコントラクトイベントをWebSocket経由で購読
+// WebSocket接続が失敗した場合、定期的なポーリングにフォールバックする
 func (g *FrimaContractGateway) SubscribeEvents(ctx context.Context) (<-chan *model.ContractEvent, error) {
 	eventChan := make(chan *model.ContractEvent, 100)
 
@@ -152,13 +154,20 @@ func (g *FrimaContractGateway) SubscribeEvents(ctx context.Context) (<-chan *mod
 		return nil, fmt.Errorf("connection test failed: %w", err)
 	}
 	
+	// WebSocket接続を試みる
 	logs := make(chan types.Log)
 	sub, err := g.client.SubscribeFilterLogs(ctx, query, logs)
 	if err != nil {
-		log.Printf("ERROR: Failed to subscribe to events: %v", err)
-		return nil, err
+		log.Printf("WARNING: WebSocket subscription failed, falling back to polling: %v", err)
+		// HTTPクライアントの場合、定期的なポーリングにフォールバック
+		go func() {
+			g.pollEvents(ctx, eventChan, header.Number.Uint64())
+			close(eventChan)
+		}()
+		return eventChan, nil
 	}
-	log.Printf("Subscribed to events (latest block: %d)", header.Number.Uint64())
+	
+	log.Printf("Subscribed to events via WebSocket (latest block: %d)", header.Number.Uint64())
 
 	go func() {
 		defer close(eventChan)
@@ -169,7 +178,17 @@ func (g *FrimaContractGateway) SubscribeEvents(ctx context.Context) (<-chan *mod
 			case <-ctx.Done():
 				return
 			case err := <-sub.Err():
-				log.Printf("ERROR: Event subscription error: %v", err)
+				log.Printf("ERROR: Event subscription error, falling back to polling: %v", err)
+				// WebSocket接続が切れた場合、ポーリングにフォールバック
+				latestBlock, err := g.client.HeaderByNumber(ctx, nil)
+				if err == nil {
+					go func() {
+						g.pollEvents(ctx, eventChan, latestBlock.Number.Uint64())
+						close(eventChan)
+					}()
+				} else {
+					close(eventChan)
+				}
 				return
 			case vLog := <-logs:
 				if vLog.Address != g.contractAddress {
@@ -185,6 +204,65 @@ func (g *FrimaContractGateway) SubscribeEvents(ctx context.Context) (<-chan *mod
 	}()
 
 	return eventChan, nil
+}
+
+// pollEvents は定期的にブロックチェーンをポーリングしてイベントを取得
+func (g *FrimaContractGateway) pollEvents(ctx context.Context, eventChan chan<- *model.ContractEvent, startBlock uint64) {
+	ticker := time.NewTicker(5 * time.Second) // 5秒ごとにポーリング
+	defer ticker.Stop()
+	// eventChanはSubscribeEventsで管理されるため、ここでは閉じない
+
+	lastProcessedBlock := startBlock
+	log.Printf("Starting event polling from block %d", lastProcessedBlock)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			header, err := g.client.HeaderByNumber(ctx, nil)
+			if err != nil {
+				log.Printf("ERROR: Failed to get latest block: %v", err)
+				continue
+			}
+
+			currentBlock := header.Number.Uint64()
+			if currentBlock <= lastProcessedBlock {
+				continue
+			}
+
+			// 新しいブロックからイベントをスキャン
+			query := ethereum.FilterQuery{
+				Addresses: []common.Address{g.contractAddress},
+				FromBlock: new(big.Int).SetUint64(lastProcessedBlock + 1),
+				ToBlock:   new(big.Int).SetUint64(currentBlock),
+			}
+
+			logs, err := g.client.FilterLogs(ctx, query)
+			if err != nil {
+				log.Printf("ERROR: Failed to filter logs: %v", err)
+				lastProcessedBlock = currentBlock
+				continue
+			}
+
+			if len(logs) > 0 {
+				log.Printf("Polling found %d events (blocks %d-%d)", len(logs), lastProcessedBlock+1, currentBlock)
+			}
+
+			for _, vLog := range logs {
+				if vLog.Address != g.contractAddress {
+					continue
+				}
+				event := g.parseLog(vLog)
+				if event != nil {
+					log.Printf("Event received (polling): %s itemId=%d tx=%s", event.Type, event.ItemId, event.TxHash)
+					eventChan <- event
+				}
+			}
+
+			lastProcessedBlock = currentBlock
+		}
+	}
 }
 
 // ScanPastEvents は過去のブロックからイベントをスキャン
@@ -245,7 +323,13 @@ func (g *FrimaContractGateway) ScanPastEvents(ctx context.Context, fromBlock uin
 // parseLog はログをContractEventに変換
 func (g *FrimaContractGateway) parseLog(vLog types.Log) *model.ContractEvent {
 	if len(vLog.Topics) == 0 {
-		log.Printf("Received log with no topics (tx: %s)", vLog.TxHash.Hex())
+		log.Printf("Received log with no topics (tx: %s, address: %s)", vLog.TxHash.Hex(), vLog.Address.Hex())
+		return nil
+	}
+
+	// コントラクトアドレスが一致するか確認
+	if vLog.Address != g.contractAddress {
+		log.Printf("Log address mismatch: expected %s, got %s (tx: %s)", g.contractAddress.Hex(), vLog.Address.Hex(), vLog.TxHash.Hex())
 		return nil
 	}
 
@@ -268,6 +352,9 @@ func (g *FrimaContractGateway) parseLog(vLog types.Log) *model.ContractEvent {
 	case receiptConfirmedSig:
 		return g.parseReceiptConfirmed(vLog)
 	default:
+		// 未知のイベントシグネチャをログに記録（デバッグ用）
+		log.Printf("WARNING: Unknown event signature: %s (tx: %s, block: %d, address: %s). This might be from another contract or a different event.",
+			eventSig, vLog.TxHash.Hex(), vLog.BlockNumber, vLog.Address.Hex())
 		return nil
 	}
 }
