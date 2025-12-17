@@ -318,6 +318,9 @@ func (g *FrimaContractGateway) parseItemListed(vLog types.Log) *model.ContractEv
 	}
 	if uid, ok := data["uid"].(string); ok {
 		event.Uid = uid
+		log.Printf("Parsed uid from ItemListed event: %s", uid)
+	} else {
+		log.Printf("WARNING: uid not found in ItemListed event data")
 	}
 	if createdAt, ok := data["createdAt"].(*big.Int); ok {
 		event.CreatedAt = createdAt.Uint64()
@@ -326,6 +329,7 @@ func (g *FrimaContractGateway) parseItemListed(vLog types.Log) *model.ContractEv
 		event.Category = category
 	}
 
+	log.Printf("Parsed ItemListed event: itemId=%d, title=%s, uid=%s, seller=%s, price=%s", event.ItemId, event.Title, event.Uid, event.Seller, event.Price.String())
 	return event
 }
 
