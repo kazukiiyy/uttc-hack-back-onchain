@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	contractGateway "uttc-hack-back-onchain/gateway/contract"
 	paymentGateway "uttc-hack-back-onchain/gateway/payment"
@@ -29,7 +30,15 @@ func main() {
 	nodeWSURL := os.Getenv("INFURA_SEPOLIA_WS_URL")
 	if nodeWSURL == "" {
 		// HTTPからWSに変換を試みる
-		nodeWSURL = nodeURL
+		// https://sepolia.infura.io/v3/... -> wss://sepolia.infura.io/v3/...
+		if strings.HasPrefix(nodeURL, "https://") {
+			nodeWSURL = strings.Replace(nodeURL, "https://", "wss://", 1)
+		} else if strings.HasPrefix(nodeURL, "http://") {
+			nodeWSURL = strings.Replace(nodeURL, "http://", "ws://", 1)
+		} else {
+			nodeWSURL = nodeURL
+		}
+		log.Printf("Converted HTTP URL to WebSocket URL: %s", nodeWSURL)
 	}
 
 	appCollectAddr := os.Getenv("APP_COLLECT_WALLET_ADDRESS")
