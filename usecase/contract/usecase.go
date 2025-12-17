@@ -39,15 +39,41 @@ func NewContractUsecase(gw contract.ContractGateway, backendBaseURL string) *con
 
 // StartEventListener はイベントリスナーを開始し、イベントをメインバックエンドに通知
 func (uc *contractUsecase) StartEventListener(ctx context.Context) error {
+	// まず過去のイベントをスキャン（最後の1000ブロック）
+	// これにより、リスナー起動後に発火したイベントもキャッチできる
+	go func() {
+		// 過去のイベントをスキャン（fromBlock=0は最後の1000ブロックからスキャンすることを意味）
+		// 注意: 実際の実装では、コントラクトのデプロイブロックからスキャンする方が良い
+		log.Printf("Starting to scan past events (last 1000 blocks)...")
+		
+		pastEvents, err := uc.gateway.ScanPastEvents(ctx, 0, nil)
+		if err != nil {
+			log.Printf("Failed to scan past events: %v", err)
+		} else {
+			eventCount := 0
+			for event := range pastEvents {
+				eventCount++
+				log.Printf("Processing past event: %s for item %d (tx: %s)", event.Type, event.ItemId, event.TxHash)
+				uc.handleEvent(event)
+			}
+			log.Printf("Processed %d past events", eventCount)
+		}
+	}()
+
+	// リアルタイムイベントを購読
 	eventChan, err := uc.gateway.SubscribeEvents(ctx)
 	if err != nil {
+		log.Printf("Failed to subscribe to events: %v", err)
 		return err
 	}
 
 	go func() {
+		log.Println("Starting real-time event subscription...")
 		for event := range eventChan {
+			log.Printf("Processing real-time event: %s for item %d (tx: %s)", event.Type, event.ItemId, event.TxHash)
 			uc.handleEvent(event)
 		}
+		log.Println("Real-time event subscription ended")
 	}()
 
 	log.Println("Contract event listener started")
