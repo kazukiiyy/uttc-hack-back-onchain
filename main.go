@@ -78,23 +78,36 @@ func main() {
 	// --- 4. Contract機能の依存性注入 ---
 	var contractHdlr *contractHandler.ContractHandler
 
-	log.Printf("Checking MARKETPLACE_CONTRACT_ADDRESS: %s", marketplaceAddr)
+		log.Printf("Checking MARKETPLACE_CONTRACT_ADDRESS: %s", marketplaceAddr)
 	if marketplaceAddr == "" {
 		log.Println("ERROR: MARKETPLACE_CONTRACT_ADDRESS is not set. Event listener will not start.")
 		log.Println("Please set MARKETPLACE_CONTRACT_ADDRESS environment variable.")
 	} else {
+		log.Printf("=== Contract Configuration ===")
 		log.Printf("Marketplace contract address found: %s", marketplaceAddr)
 		
 		// WebSocket接続でイベント購読
+		log.Printf("=== WebSocket Connection Test ===")
 		log.Printf("Attempting to connect WebSocket: %s", nodeWSURL)
 		wsClient, err := ethclient.Dial(nodeWSURL)
 		if err != nil {
-			log.Printf("ERROR: Failed to connect WebSocket for events: %v", err)
-			log.Printf("Falling back to HTTP client (real-time events may not work)")
+			log.Printf("✗ ERROR: Failed to connect WebSocket for events: %v", err)
+			log.Printf("  WebSocket URL: %s", nodeWSURL)
+			log.Printf("  Falling back to HTTP client (real-time events may not work)")
+			log.Printf("  NOTE: HTTP client does NOT support SubscribeFilterLogs")
+			log.Printf("  Real-time event listening will NOT work with HTTP client")
 			// HTTP clientでコントラクト機能は使用可能（ただしリアルタイムイベントは動作しない）
 			wsClient = client
 		} else {
-			log.Println("Successfully connected to Sepolia network (WebSocket for events).")
+			log.Println("✓ Successfully connected to Sepolia network (WebSocket for events).")
+			// WebSocket接続の動作確認
+			ctx := context.Background()
+			header, err := wsClient.HeaderByNumber(ctx, nil)
+			if err != nil {
+				log.Printf("✗ WARNING: WebSocket connection test failed: %v", err)
+			} else {
+				log.Printf("✓ WebSocket connection verified - Latest block: %d", header.Number.Uint64())
+			}
 		}
 
 		log.Printf("Initializing contract gateway...")
