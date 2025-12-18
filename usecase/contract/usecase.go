@@ -43,9 +43,11 @@ func NewContractUsecase(gw contract.ContractGateway, backendBaseURL string) *con
 func (uc *contractUsecase) StartEventListener(ctx context.Context) error {
 	log.Printf("Starting event listener (backend: %s, contract: %s)", uc.backendBaseURL, uc.gateway.GetContractAddress())
 
-	// 過去のイベントをスキャン（完了後にリアルタイムリスニングを開始）
+	// リアルタイムリスニングを即座に開始（過去イベントスキャンと並行実行）
+	go uc.startRealtimeListener(ctx)
+
+	// 過去のイベントをスキャン（バックグラウンドで実行）
 	go func() {
-		// 環境変数からデプロイブロックを取得（指定がない場合は0=自動）
 		deployBlock := getDeployBlockFromEnv()
 		if deployBlock > 0 {
 			log.Printf("Using deploy block from environment: %d", deployBlock)
@@ -56,26 +58,17 @@ func (uc *contractUsecase) StartEventListener(ctx context.Context) error {
 		pastEvents, err := uc.gateway.ScanPastEvents(ctx, deployBlock, nil)
 		if err != nil {
 			log.Printf("ERROR: Failed to scan past events: %v", err)
-			// エラーが発生してもリアルタイムリスニングは開始する
-			go uc.startRealtimeListener(ctx)
 			return
 		}
 		
-		// 過去のイベントを処理
-		lastProcessedBlock := deployBlock
 		for event := range pastEvents {
 			uc.handleEvent(event)
-			if event.BlockNo > lastProcessedBlock {
-				lastProcessedBlock = event.BlockNo
-			}
 		}
 		
-		log.Printf("Past events scan completed. Starting realtime listener from block %d", lastProcessedBlock)
-		// 過去のイベントスキャンが完了したら、リアルタイムリスニングを開始
-		go uc.startRealtimeListener(ctx)
+		log.Printf("Past events scan completed")
 	}()
 
-	log.Println("Event listener started (past events scan in progress)")
+	log.Println("Event listener started")
 	return nil
 }
 
