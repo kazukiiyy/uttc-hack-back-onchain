@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"uttc-hack-back-onchain/gateway/contract"
@@ -43,7 +45,15 @@ func (uc *contractUsecase) StartEventListener(ctx context.Context) error {
 
 	// 過去のイベントをスキャン（完了後にリアルタイムリスニングを開始）
 	go func() {
-		pastEvents, err := uc.gateway.ScanPastEvents(ctx, 0, nil)
+		// 環境変数からデプロイブロックを取得（指定がない場合は0=自動）
+		deployBlock := getDeployBlockFromEnv()
+		if deployBlock > 0 {
+			log.Printf("Using deploy block from environment: %d", deployBlock)
+		} else {
+			log.Println("No deploy block specified, scanning from last 10000 blocks")
+		}
+		
+		pastEvents, err := uc.gateway.ScanPastEvents(ctx, deployBlock, nil)
 		if err != nil {
 			log.Printf("ERROR: Failed to scan past events: %v", err)
 			// エラーが発生してもリアルタイムリスニングは開始する
@@ -52,7 +62,7 @@ func (uc *contractUsecase) StartEventListener(ctx context.Context) error {
 		}
 		
 		// 過去のイベントを処理
-		lastProcessedBlock := uint64(0)
+		lastProcessedBlock := deployBlock
 		for event := range pastEvents {
 			uc.handleEvent(event)
 			if event.BlockNo > lastProcessedBlock {
@@ -67,6 +77,24 @@ func (uc *contractUsecase) StartEventListener(ctx context.Context) error {
 
 	log.Println("Event listener started (past events scan in progress)")
 	return nil
+}
+
+// getDeployBlockFromEnv は環境変数からデプロイブロックを取得
+func getDeployBlockFromEnv() uint64 {
+	// 環境変数 CONTRACT_DEPLOY_BLOCK が設定されている場合はそれを使用
+	// 設定されていない場合は0を返す（自動スキャン）
+	deployBlockStr := os.Getenv("CONTRACT_DEPLOY_BLOCK")
+	if deployBlockStr == "" {
+		return 0
+	}
+	
+	deployBlock, err := strconv.ParseUint(deployBlockStr, 10, 64)
+	if err != nil {
+		log.Printf("WARNING: Invalid CONTRACT_DEPLOY_BLOCK value: %s, using 0 (auto)", deployBlockStr)
+		return 0
+	}
+	
+	return deployBlock
 }
 
 // startRealtimeListener はリアルタイムイベントリスニングを開始（自動再起動）
