@@ -145,9 +145,12 @@ func (g *FrimaContractGateway) GetItem(ctx context.Context, itemId uint64) (*mod
 func (g *FrimaContractGateway) SubscribeEvents(ctx context.Context) (<-chan *model.ContractEvent, error) {
 	eventChan := make(chan *model.ContractEvent, 100)
 
-	header, err := g.client.HeaderByNumber(ctx, nil)
+	// 接続のヘルスチェック（タイムアウト付き）
+	healthCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	header, err := g.client.HeaderByNumber(healthCtx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("connection test failed: %w", err)
+		return nil, fmt.Errorf("connection test failed (connection may be lost): %w", err)
 	}
 
 	// WebSocket接続を試みる
@@ -165,21 +168,25 @@ func (g *FrimaContractGateway) SubscribeEvents(ctx context.Context) (<-chan *mod
 	log.Printf("Subscribed to events via WebSocket (latest block: %d)", header.Number.Uint64())
 
 	go func() {
-		defer sub.Unsubscribe()
+		defer func() {
+			sub.Unsubscribe()
+			// WebSocket接続が切れたときにチャネルを閉じる（useCase側で再接続が試みられる）
+			close(eventChan)
+		}()
 
 		for {
 			select {
 			case <-ctx.Done():
-				close(eventChan)
 				return
 			case err := <-sub.Err():
-				log.Printf("ERROR: WebSocket error, falling back to polling: %v", err)
-				latestBlock, err := g.client.HeaderByNumber(ctx, nil)
-				if err == nil {
-					go g.pollEvents(ctx, eventChan, latestBlock.Number.Uint64())
-				}
+				log.Printf("ERROR: WebSocket error, channel will be closed for reconnection: %v", err)
+				// チャネルを閉じてuseCase側の再接続ロジックをトリガー
 				return
-			case vLog := <-logs:
+			case vLog, ok := <-logs:
+				if !ok {
+					log.Printf("WARNING: WebSocket logs channel closed, reconnecting...")
+					return
+				}
 				if vLog.Address != g.contractAddress {
 					continue
 				}
@@ -189,7 +196,6 @@ func (g *FrimaContractGateway) SubscribeEvents(ctx context.Context) (<-chan *mod
 					select {
 					case eventChan <- event:
 					case <-ctx.Done():
-						close(eventChan)
 						return
 					}
 				}
@@ -206,6 +212,7 @@ func (g *FrimaContractGateway) pollEvents(ctx context.Context, eventChan chan<- 
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("ERROR: pollEvents panic: %v", r)
+			// パニック時はチャネルを閉じてuseCase側で再接続を試みる
 			close(eventChan)
 		}
 	}()
@@ -216,16 +223,19 @@ func (g *FrimaContractGateway) pollEvents(ctx context.Context, eventChan chan<- 
 	lastProcessedBlock := startBlock
 	log.Printf("Starting event polling from block %d", lastProcessedBlock)
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			header, err := g.client.HeaderByNumber(ctx, nil)
-			if err != nil {
-				log.Printf("ERROR: Failed to get latest block: %v", err)
-				continue
-			}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// 接続のヘルスチェック
+				header, err := g.client.HeaderByNumber(ctx, nil)
+				if err != nil {
+					log.Printf("ERROR: Failed to get latest block (connection may be lost): %v", err)
+					// 接続エラーの場合、チャネルを閉じてuseCase側で再接続を試みる
+					close(eventChan)
+					return
+				}
 
 			currentBlock := header.Number.Uint64()
 			if currentBlock <= lastProcessedBlock {
