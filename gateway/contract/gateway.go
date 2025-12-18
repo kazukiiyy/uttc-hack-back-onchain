@@ -145,47 +145,38 @@ func (g *FrimaContractGateway) GetItem(ctx context.Context, itemId uint64) (*mod
 func (g *FrimaContractGateway) SubscribeEvents(ctx context.Context) (<-chan *model.ContractEvent, error) {
 	eventChan := make(chan *model.ContractEvent, 100)
 
-	query := ethereum.FilterQuery{
-		Addresses: []common.Address{g.contractAddress},
-	}
-
 	header, err := g.client.HeaderByNumber(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("connection test failed: %w", err)
 	}
-	
+
 	// WebSocket接続を試みる
+	query := ethereum.FilterQuery{
+		Addresses: []common.Address{g.contractAddress},
+	}
 	logs := make(chan types.Log)
 	sub, err := g.client.SubscribeFilterLogs(ctx, query, logs)
 	if err != nil {
 		log.Printf("WARNING: WebSocket subscription failed, falling back to polling: %v", err)
-		// HTTPクライアントの場合、定期的なポーリングにフォールバック
-		go func() {
-			g.pollEvents(ctx, eventChan, header.Number.Uint64())
-			close(eventChan)
-		}()
+		go g.pollEvents(ctx, eventChan, header.Number.Uint64())
 		return eventChan, nil
 	}
-	
+
 	log.Printf("Subscribed to events via WebSocket (latest block: %d)", header.Number.Uint64())
 
 	go func() {
-		defer close(eventChan)
 		defer sub.Unsubscribe()
 
 		for {
 			select {
 			case <-ctx.Done():
+				close(eventChan)
 				return
 			case err := <-sub.Err():
-				log.Printf("ERROR: Event subscription error, falling back to polling: %v", err)
-				// WebSocket接続が切れた場合、ポーリングにフォールバック
+				log.Printf("ERROR: WebSocket error, falling back to polling: %v", err)
 				latestBlock, err := g.client.HeaderByNumber(ctx, nil)
 				if err == nil {
-					go func() {
-						g.pollEvents(ctx, eventChan, latestBlock.Number.Uint64())
-						close(eventChan)
-					}()
+					go g.pollEvents(ctx, eventChan, latestBlock.Number.Uint64())
 				} else {
 					close(eventChan)
 				}
@@ -197,7 +188,12 @@ func (g *FrimaContractGateway) SubscribeEvents(ctx context.Context) (<-chan *mod
 				event := g.parseLog(vLog)
 				if event != nil {
 					log.Printf("Event received: %s itemId=%d tx=%s", event.Type, event.ItemId, event.TxHash)
-					eventChan <- event
+					select {
+					case eventChan <- event:
+					case <-ctx.Done():
+						close(eventChan)
+						return
+					}
 				}
 			}
 		}
@@ -208,9 +204,9 @@ func (g *FrimaContractGateway) SubscribeEvents(ctx context.Context) (<-chan *mod
 
 // pollEvents は定期的にブロックチェーンをポーリングしてイベントを取得
 func (g *FrimaContractGateway) pollEvents(ctx context.Context, eventChan chan<- *model.ContractEvent, startBlock uint64) {
-	ticker := time.NewTicker(5 * time.Second) // 5秒ごとにポーリング
+	defer close(eventChan)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	// eventChanはSubscribeEventsで管理されるため、ここでは閉じない
 
 	lastProcessedBlock := startBlock
 	log.Printf("Starting event polling from block %d", lastProcessedBlock)
@@ -231,7 +227,6 @@ func (g *FrimaContractGateway) pollEvents(ctx context.Context, eventChan chan<- 
 				continue
 			}
 
-			// 新しいブロックからイベントをスキャン
 			query := ethereum.FilterQuery{
 				Addresses: []common.Address{g.contractAddress},
 				FromBlock: new(big.Int).SetUint64(lastProcessedBlock + 1),
@@ -256,7 +251,11 @@ func (g *FrimaContractGateway) pollEvents(ctx context.Context, eventChan chan<- 
 				event := g.parseLog(vLog)
 				if event != nil {
 					log.Printf("Event received (polling): %s itemId=%d tx=%s", event.Type, event.ItemId, event.TxHash)
-					eventChan <- event
+					select {
+					case eventChan <- event:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 
