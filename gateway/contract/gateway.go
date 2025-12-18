@@ -53,7 +53,7 @@ func NewFrimaContractGateway(client *ethclient.Client, contractAddr string) (*Fr
 
 	contractAddress := common.HexToAddress(contractAddr)
 	log.Printf("Initializing contract gateway: %s", contractAddress.Hex())
-	
+
 	// イベントが正しく定義されているか確認
 	eventNames := []string{"ItemListed", "ItemPurchased", "ItemUpdated", "ItemCancelled", "ReceiptConfirmed"}
 	for _, eventName := range eventNames {
@@ -285,8 +285,9 @@ func (g *FrimaContractGateway) ScanPastEvents(ctx context.Context, fromBlock uin
 		currentBlock := header.Number.Uint64()
 		actualFromBlock := fromBlock
 		if fromBlock == 0 {
-			if currentBlock > 1000 {
-				actualFromBlock = currentBlock - 1000
+			// より広い範囲をスキャン（10000ブロック、約1.4日分）
+			if currentBlock > 10000 {
+				actualFromBlock = currentBlock - 10000
 			}
 		}
 
