@@ -224,7 +224,6 @@ func (uc *contractUsecase) handleEvent(event *model.ContractEvent) {
 // notifyBackend はメインバックエンドにイベントを通知
 func (uc *contractUsecase) notifyBackend(endpoint string, payload interface{}) error {
 	url := uc.backendBaseURL + endpoint
-
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)
@@ -236,8 +235,7 @@ func (uc *contractUsecase) notifyBackend(endpoint string, payload interface{}) e
 
 	for i := 0; i < maxRetries; i++ {
 		if i > 0 {
-			waitTime := time.Duration(i) * time.Second
-			time.Sleep(waitTime)
+			time.Sleep(time.Duration(i) * time.Second)
 		}
 
 		resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonData))
@@ -247,15 +245,16 @@ func (uc *contractUsecase) notifyBackend(endpoint string, payload interface{}) e
 		}
 		defer resp.Body.Close()
 
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return nil
-		}
-
 		bodyBytes := make([]byte, 1024)
 		n, _ := resp.Body.Read(bodyBytes)
 		bodyStr := string(bodyBytes[:n])
 
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return nil
+		}
+
 		lastErr = fmt.Errorf("backend returned status %d: %s", resp.StatusCode, bodyStr)
+		// 4xxエラーはリトライしない
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			return lastErr
 		}
