@@ -178,6 +178,7 @@ func (uc *contractUsecase) handleEvent(event *model.ContractEvent) {
 			"token_id":      event.TokenId,
 			"tx_hash":       event.TxHash,
 		}
+		log.Printf("Processing ItemPurchased event: itemId=%d, buyer=%s, txHash=%s", event.ItemId, event.Buyer, event.TxHash)
 
 	case model.EventItemUpdated:
 		endpoint = "/api/v1/blockchain/item-updated"
