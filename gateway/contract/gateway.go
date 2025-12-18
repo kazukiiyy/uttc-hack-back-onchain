@@ -177,8 +177,6 @@ func (g *FrimaContractGateway) SubscribeEvents(ctx context.Context) (<-chan *mod
 				latestBlock, err := g.client.HeaderByNumber(ctx, nil)
 				if err == nil {
 					go g.pollEvents(ctx, eventChan, latestBlock.Number.Uint64())
-				} else {
-					close(eventChan)
 				}
 				return
 			case vLog := <-logs:
@@ -203,8 +201,15 @@ func (g *FrimaContractGateway) SubscribeEvents(ctx context.Context) (<-chan *mod
 }
 
 // pollEvents は定期的にブロックチェーンをポーリングしてイベントを取得
+// チャネルをクローズしない（永続実行）
 func (g *FrimaContractGateway) pollEvents(ctx context.Context, eventChan chan<- *model.ContractEvent, startBlock uint64) {
-	defer close(eventChan)
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("ERROR: pollEvents panic: %v", r)
+			close(eventChan)
+		}
+	}()
+
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -241,7 +246,7 @@ func (g *FrimaContractGateway) pollEvents(ctx context.Context, eventChan chan<- 
 			}
 
 			if len(logs) > 0 {
-				log.Printf("Polling found %d events (blocks %d-%d)", len(logs), lastProcessedBlock+1, currentBlock)
+				log.Printf("Found %d events (blocks %d-%d)", len(logs), lastProcessedBlock+1, currentBlock)
 			}
 
 			for _, vLog := range logs {
@@ -250,7 +255,7 @@ func (g *FrimaContractGateway) pollEvents(ctx context.Context, eventChan chan<- 
 				}
 				event := g.parseLog(vLog)
 				if event != nil {
-					log.Printf("Event received (polling): %s itemId=%d tx=%s", event.Type, event.ItemId, event.TxHash)
+					log.Printf("Event received: %s itemId=%d tx=%s", event.Type, event.ItemId, event.TxHash)
 					select {
 					case eventChan <- event:
 					case <-ctx.Done():
