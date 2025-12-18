@@ -41,60 +41,72 @@ func NewContractUsecase(gw contract.ContractGateway, backendBaseURL string) *con
 func (uc *contractUsecase) StartEventListener(ctx context.Context) error {
 	log.Printf("Starting event listener (backend: %s, contract: %s)", uc.backendBaseURL, uc.gateway.GetContractAddress())
 
-	// 過去のイベントをスキャン
+	// 過去のイベントをスキャン（完了後にリアルタイムリスニングを開始）
 	go func() {
 		pastEvents, err := uc.gateway.ScanPastEvents(ctx, 0, nil)
 		if err != nil {
 			log.Printf("ERROR: Failed to scan past events: %v", err)
+			// エラーが発生してもリアルタイムリスニングは開始する
+			go uc.startRealtimeListener(ctx)
 			return
 		}
+		
+		// 過去のイベントを処理
+		lastProcessedBlock := uint64(0)
 		for event := range pastEvents {
 			uc.handleEvent(event)
+			if event.BlockNo > lastProcessedBlock {
+				lastProcessedBlock = event.BlockNo
+			}
 		}
+		
+		log.Printf("Past events scan completed. Starting realtime listener from block %d", lastProcessedBlock)
+		// 過去のイベントスキャンが完了したら、リアルタイムリスニングを開始
+		go uc.startRealtimeListener(ctx)
 	}()
 
-	// リアルタイムイベントリスニング（自動再起動）
-	go func() {
-		retryDelay := 5 * time.Second
-		maxRetryDelay := 60 * time.Second
+	log.Println("Event listener started (past events scan in progress)")
+	return nil
+}
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				eventChan, err := uc.gateway.SubscribeEvents(ctx)
-				if err != nil {
-					log.Printf("ERROR: Failed to subscribe: %v, retrying in %v", err, retryDelay)
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(retryDelay):
-						retryDelay = min(retryDelay*2, maxRetryDelay)
-					}
-					continue
-				}
+// startRealtimeListener はリアルタイムイベントリスニングを開始（自動再起動）
+func (uc *contractUsecase) startRealtimeListener(ctx context.Context) {
+	retryDelay := 5 * time.Second
+	maxRetryDelay := 60 * time.Second
 
-				retryDelay = 5 * time.Second
-				log.Println("Event listener connected")
-
-				for event := range eventChan {
-					uc.handleEvent(event)
-				}
-
-				log.Printf("Event channel closed, reconnecting in %v...", retryDelay)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			eventChan, err := uc.gateway.SubscribeEvents(ctx)
+			if err != nil {
+				log.Printf("ERROR: Failed to subscribe: %v, retrying in %v", err, retryDelay)
 				select {
 				case <-ctx.Done():
 					return
 				case <-time.After(retryDelay):
 					retryDelay = min(retryDelay*2, maxRetryDelay)
 				}
+				continue
+			}
+
+			retryDelay = 5 * time.Second
+			log.Println("Event listener connected (realtime)")
+
+			for event := range eventChan {
+				uc.handleEvent(event)
+			}
+
+			log.Printf("Event channel closed, reconnecting in %v...", retryDelay)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(retryDelay):
+				retryDelay = min(retryDelay*2, maxRetryDelay)
 			}
 		}
-	}()
-
-	log.Println("Event listener started")
-	return nil
+	}
 }
 
 func min(a, b time.Duration) time.Duration {
