@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	contractGateway "uttc-hack-back-onchain/gateway/contract"
 	paymentGateway "uttc-hack-back-onchain/gateway/payment"
@@ -150,7 +151,16 @@ func main() {
 		log.Println("  - POST /api/v1/contract/verify-tx")
 	}
 
-	if err := http.ListenAndServe(":"+port, corsHandler); err != nil {
+	// HTTPサーバーにタイムアウト設定を追加（長時間接続の維持）
+	server := &http.Server{
+		Addr:         ":" + port,
+		Handler:      corsHandler,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second, // アイドル接続を2分間維持
+	}
+
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("could not start server: %v", err)
 	}
 }
