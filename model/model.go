@@ -59,6 +59,7 @@ type ContractEvent struct {
 	Category    string    `json:"category,omitempty"`
 	Seller      string    `json:"seller,omitempty"`
 	Buyer       string    `json:"buyer,omitempty"`
+	BuyerUid    string    `json:"buyer_uid,omitempty"`
 	CreatedAt   uint64    `json:"created_at,omitempty"`
 	UpdatedAt   uint64    `json:"updated_at,omitempty"`
 }
@@ -78,6 +79,7 @@ type ContractItem struct {
 	Category    string   `json:"category"`
 	Seller      string   `json:"seller"`
 	Buyer       string   `json:"buyer"`
+	BuyerUid    string   `json:"buyer_uid"`
 	Status      uint8    `json:"status"` // 0: Listed, 1: Purchased, 2: Completed, 3: Cancelled
 }
 

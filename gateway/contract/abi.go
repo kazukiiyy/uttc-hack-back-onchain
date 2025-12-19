@@ -3,7 +3,10 @@ package contract
 // FrimaMarketplaceABI はFrimaMarketplaceコントラクトのABI
 const FrimaMarketplaceABI = `[
   {
-    "inputs": [{"internalType": "address", "name": "_nftContract", "type": "address"}],
+    "inputs": [
+      {"internalType": "address", "name": "_nftContract", "type": "address"},
+      {"internalType": "address payable", "name": "_feeRecipient", "type": "address"}
+    ],
     "stateMutability": "nonpayable",
     "type": "constructor"
   },
@@ -41,7 +44,8 @@ const FrimaMarketplaceABI = `[
       {"indexed": true, "internalType": "address", "name": "buyer", "type": "address"},
       {"indexed": false, "internalType": "uint256", "name": "price", "type": "uint256"},
       {"indexed": false, "internalType": "uint256", "name": "timestamp", "type": "uint256"},
-      {"indexed": false, "internalType": "uint256", "name": "tokenId", "type": "uint256"}
+      {"indexed": false, "internalType": "uint256", "name": "tokenId", "type": "uint256"},
+      {"indexed": false, "internalType": "string", "name": "buyerUid", "type": "string"}
     ],
     "name": "ItemPurchased",
     "type": "event"
@@ -73,7 +77,10 @@ const FrimaMarketplaceABI = `[
     "type": "event"
   },
   {
-    "inputs": [{"internalType": "uint256", "name": "_itemId", "type": "uint256"}],
+    "inputs": [
+      {"internalType": "uint256", "name": "_itemId", "type": "uint256"},
+      {"internalType": "string", "name": "_buyerUid", "type": "string"}
+    ],
     "name": "buyItem",
     "outputs": [],
     "stateMutability": "payable",
@@ -94,6 +101,20 @@ const FrimaMarketplaceABI = `[
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "FEE_PERCENT",
+    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "feeRecipient",
+    "outputs": [{"internalType": "address payable", "name": "", "type": "address"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [{"internalType": "uint256", "name": "_itemId", "type": "uint256"}],
     "name": "getItem",
     "outputs": [
@@ -110,8 +131,9 @@ const FrimaMarketplaceABI = `[
           {"internalType": "uint256", "name": "updatedAt", "type": "uint256"},
           {"internalType": "bool", "name": "isPurchased", "type": "bool"},
           {"internalType": "string", "name": "category", "type": "string"},
-          {"internalType": "address", "name": "seller", "type": "address"},
-          {"internalType": "address", "name": "buyer", "type": "address"},
+          {"internalType": "address payable", "name": "seller", "type": "address"},
+          {"internalType": "address payable", "name": "buyer", "type": "address"},
+          {"internalType": "string", "name": "buyerUid", "type": "string"},
           {"internalType": "uint8", "name": "status", "type": "uint8"}
         ],
         "internalType": "struct FrimaMarketplace.Item",
@@ -146,6 +168,7 @@ const FrimaMarketplaceABI = `[
       {"internalType": "string", "name": "category", "type": "string"},
       {"internalType": "address payable", "name": "seller", "type": "address"},
       {"internalType": "address payable", "name": "buyer", "type": "address"},
+      {"internalType": "string", "name": "buyerUid", "type": "string"},
       {"internalType": "uint8", "name": "status", "type": "uint8"}
     ],
     "stateMutability": "view",
@@ -159,7 +182,7 @@ const FrimaMarketplaceABI = `[
       {"internalType": "string", "name": "_imageUrl", "type": "string"},
       {"internalType": "string", "name": "_uid", "type": "string"},
       {"internalType": "string", "name": "_category", "type": "string"},
-      {"internalType": "string", "name": "_tokenURI", "type": "string"}
+      {"internalType": "string", "name": "_tokenUri", "type": "string"}
     ],
     "name": "listItem",
     "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
