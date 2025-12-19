@@ -50,8 +50,7 @@ func main() {
 	// WebSocket URL（イベント購読用）
 	nodeWSURL := os.Getenv("INFURA_SEPOLIA_WS_URL")
 	if nodeWSURL == "" {
-		// HTTPからWSに変換を試みる
-		// https://sepolia.infura.io/v3/... -> wss://sepolia.infura.io/v3/...
+
 		if strings.HasPrefix(nodeURL, "https://") {
 			nodeWSURL = strings.Replace(nodeURL, "https://", "wss://", 1)
 		} else if strings.HasPrefix(nodeURL, "http://") {
@@ -76,9 +75,6 @@ func main() {
 	}
 
 	backendBaseURL := os.Getenv("BACKEND_BASE_URL")
-	if backendBaseURL == "" {
-		backendBaseURL = "https://hackathon-backend-982651832089.europe-west1.run.app"
-	}
 
 	// --- 2. ethclientの初期化 ---
 	client, err := ethclient.Dial(nodeURL)
