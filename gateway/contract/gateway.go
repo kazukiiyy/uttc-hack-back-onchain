@@ -77,11 +77,6 @@ func (g *FrimaContractGateway) GetContractAddress() string {
 	return g.contractAddress.Hex()
 }
 
-// GetLatestBlock は最新のブロックヘッダーを取得
-func (g *FrimaContractGateway) GetLatestBlock(ctx context.Context) (*types.Header, error) {
-	return g.client.HeaderByNumber(ctx, nil)
-}
-
 // GetItem はコントラクトから商品情報を取得
 func (g *FrimaContractGateway) GetItem(ctx context.Context, itemId uint64) (*model.ContractItem, error) {
 	data, err := g.contractABI.Pack("getItem", big.NewInt(int64(itemId)))

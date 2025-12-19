@@ -11,7 +11,6 @@ type OrderStatus string
 const (
 	StatusPending OrderStatus = "PENDING"       // 支払い待ち
 	StatusPaid    OrderStatus = "PAID"          // 支払い済み
-	StatusShipped OrderStatus = "SHIPPED"       // 発送済み
 	StatusError   OrderStatus = "PAYMENT_ERROR" // 支払いエラー
 )
 
@@ -91,13 +90,3 @@ type TxVerification struct {
 	Success        bool   `json:"success"`
 	IsContractCall bool   `json:"is_contract_call"`
 }
-
-// ItemStatus はコントラクト上の商品ステータス
-type ItemStatus uint8
-
-const (
-	ItemStatusListed    ItemStatus = 0
-	ItemStatusPurchased ItemStatus = 1
-	ItemStatusCompleted ItemStatus = 2
-	ItemStatusCancelled ItemStatus = 3
-)
