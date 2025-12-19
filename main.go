@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -19,6 +20,25 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/rs/cors"
 )
+
+// keepAlive は自身のヘルスエンドポイントを定期的に呼び出してCloud Runのアイドルタイムアウトを防ぐ
+func keepAlive(port string) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	url := fmt.Sprintf("http://localhost:%s/health", port)
+
+	for range ticker.C {
+		resp, err := client.Get(url)
+		if err != nil {
+			log.Printf("Keep-alive ping failed: %v", err)
+			continue
+		}
+		resp.Body.Close()
+		log.Println("Keep-alive ping sent")
+	}
+}
 
 func main() {
 	// --- 1. 初期設定 ---
@@ -150,6 +170,9 @@ func main() {
 		log.Println("  - GET  /api/v1/contract/item/{itemId}")
 		log.Println("  - POST /api/v1/contract/verify-tx")
 	}
+
+	// Keep-aliveを開始（Cloud Runのアイドルタイムアウト対策）
+	go keepAlive(port)
 
 	// HTTPサーバーにタイムアウト設定を追加（長時間接続の維持）
 	server := &http.Server{
