@@ -109,6 +109,7 @@ func (g *FrimaContractGateway) GetItem(ctx context.Context, itemId uint64) (*mod
 		Category    string
 		Seller      common.Address
 		Buyer       common.Address
+		BuyerUid    string
 		Status      uint8
 	}
 
@@ -131,6 +132,7 @@ func (g *FrimaContractGateway) GetItem(ctx context.Context, itemId uint64) (*mod
 		Category:    item.Category,
 		Seller:      item.Seller.Hex(),
 		Buyer:       item.Buyer.Hex(),
+		BuyerUid:    item.BuyerUid,
 		Status:      item.Status,
 	}, nil
 }
@@ -444,6 +446,9 @@ func (g *FrimaContractGateway) parseItemPurchased(vLog types.Log) *model.Contrac
 	}
 	if tokenId, ok := data["tokenId"].(*big.Int); ok {
 		event.TokenId = tokenId.Uint64()
+	}
+	if buyerUid, ok := data["buyerUid"].(string); ok {
+		event.BuyerUid = buyerUid
 	}
 
 	return event
